@@ -215,6 +215,8 @@ function configureLaunchOptions(userDataDir: string): any {
       "--metrics-recording-only",
       "--no-pings",
       "--safebrowsing-disable-auto-update",
+      "--no-sandbox", // Required for running as root in Docker
+      "--disable-setuid-sandbox",
     ],
   };
 

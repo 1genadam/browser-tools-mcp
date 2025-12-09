@@ -10,12 +10,23 @@ import bodyParser from 'body-parser';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { runLighthouseAudit } from './browser-tools-server/dist/lighthouse/index.js';
+import { runAccessibilityAudit } from './browser-tools-server/dist/lighthouse/accessibility.js';
+import { runPerformanceAudit } from './browser-tools-server/dist/lighthouse/performance.js';
+import { runSEOAudit } from './browser-tools-server/dist/lighthouse/seo.js';
+import { runBestPracticesAudit } from './browser-tools-server/dist/lighthouse/best-practices.js';
+import { runPWAAudit } from './browser-tools-server/dist/lighthouse/pwa.js';
+import { runComprehensiveSiteAnalysis } from './browser-tools-server/dist/lighthouse/comprehensive-analysis.js';
+import { AuditCategory } from './browser-tools-server/dist/lighthouse/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = 5031;
+
+// Session management
+const sessions = new Map();
 
 // Middleware
 app.use(cors());
@@ -25,20 +36,25 @@ app.use(bodyParser.json());
 app.get('/', (req, res) => {
   res.json({
     service: 'AgentDesk Browser Tools MCP Server',
-    version: '1.2.0',
+    version: '2.0.0',
     port: PORT,
-    description: 'Browser monitoring and interaction tool via Chrome extension and Anthropic MCP',
+    description: 'Browser monitoring and interaction tool via Chrome extension and Anthropic MCP with session support',
     endpoints: {
       health: 'GET /health - Health check',
       status: 'GET /status - Server status',
-      screenshot: 'POST /browser/screenshot - Capture screenshot',
-      lighthouse: 'POST /browser/lighthouse - Run Lighthouse audit',
+      sessionStart: 'POST /session/start - Create new session',
+      sessionNavigate: 'POST /session/:id/navigate - Navigate session to URL',
+      sessionConsole: 'GET /session/:id/console - Get session console logs',
+      sessionLighthouse: 'GET /session/:id/lighthouse - Run Lighthouse audit for session',
+      sessionClose: 'POST /session/:id/close - Close session',
+      screenshot: 'POST /browser/screenshot - Capture screenshot (legacy)',
+      lighthouse: 'POST /browser/lighthouse - Run Lighthouse audit (legacy)',
       accessibility: 'POST /browser/accessibility - WCAG compliance check',
       performance: 'POST /browser/performance - Performance analysis',
       seo: 'POST /browser/seo - SEO audit',
       debug: 'POST /browser/debug - Debug mode (all tools)',
       audit: 'POST /browser/audit - Audit mode (all audits)',
-      console_logs: 'GET /browser/console - Get console logs',
+      console_logs: 'GET /browser/console - Get console logs (legacy)',
       network: 'GET /browser/network - Get network requests'
     },
     documentation: 'See https://browsertools.agentdesk.ai/ for full guide',
@@ -47,7 +63,7 @@ app.get('/', (req, res) => {
       browser_server: 'npx @agentdeskai/browser-tools-server@latest',
       chrome_extension: 'v1.2.0 required'
     },
-    integration: 'Chrome DevTools panel + MCP protocol',
+    integration: 'Chrome DevTools panel + MCP protocol + Session management',
     timestamp: new Date().toISOString()
   });
 });
@@ -69,7 +85,8 @@ app.get('/health', (req, res) => {
       'chrome_extension_integration',
       'puppeteer_automation',
       'debug_mode',
-      'audit_mode'
+      'audit_mode',
+      'session_management'
     ],
     dependencies: {
       browser_tools_server: 'required',
@@ -86,11 +103,13 @@ app.get('/health', (req, res) => {
 app.get('/status', (req, res) => {
   res.json({
     service: 'agentdesk-browser-tools',
-    version: '1.2.0',
+    version: '2.0.0',
     port: PORT,
     browser_tools_server: 'standalone process',
     mcp_server: 'stdio mode',
     chrome_extension: 'required',
+    session_support: 'enabled',
+    active_sessions: sessions.size,
     features: {
       auto_paste_cursor: 'enabled',
       lighthouse_integration: 'enabled',
@@ -104,6 +123,376 @@ app.get('/status', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// ========================================================================
+// SESSION-BASED ENDPOINTS (Chrome DevTools MCP Compatible)
+// ========================================================================
+
+// Create session endpoint
+app.post('/session/start', async (req, res) => {
+  try {
+    const { sessionId, headless = true, slowMo = 0 } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        error: 'sessionId parameter is required',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Check if session already exists
+    if (sessions.has(sessionId)) {
+      return res.status(409).json({
+        success: false,
+        error: 'Session already exists',
+        sessionId,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Create session state
+    const session = {
+      sessionId,
+      headless,
+      slowMo,
+      url: null,
+      consoleLogs: [],
+      lighthouseResults: null,
+      created: new Date().toISOString(),
+      lastActivity: new Date().toISOString()
+    };
+
+    sessions.set(sessionId, session);
+
+    res.json({
+      success: true,
+      sessionId,
+      message: 'Session created successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Navigate session to URL
+app.post('/session/:id/navigate', async (req, res) => {
+  try {
+    const sessionId = req.params.id;
+    const { url } = req.body;
+
+    if (!url) {
+      return res.status(400).json({
+        success: false,
+        error: 'URL parameter is required',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found',
+        sessionId,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Update session state
+    session.url = url;
+    session.lastActivity = new Date().toISOString();
+    sessions.set(sessionId, session);
+
+    res.json({
+      success: true,
+      sessionId,
+      message: `Navigated to ${url}`,
+      url,
+      note: 'Full navigation requires browser-tools-server and MCP server running',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Get session console logs
+app.get('/session/:id/console', async (req, res) => {
+  try {
+    const sessionId = req.params.id;
+
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found',
+        sessionId,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Update session state
+    session.lastActivity = new Date().toISOString();
+    sessions.set(sessionId, session);
+
+    res.json({
+      success: true,
+      sessionId,
+      consoleLogs: session.consoleLogs,
+      log_count: session.consoleLogs.length,
+      note: 'Console logs require browser-tools-server and Chrome extension running',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Get session Lighthouse audit
+app.get('/session/:id/lighthouse', async (req, res) => {
+  try {
+    const sessionId = req.params.id;
+
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found',
+        sessionId,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const url = session.url;
+    if (!url) {
+      return res.status(400).json({
+        success: false,
+        error: 'No URL navigated yet. Use POST /session/:id/navigate first',
+        sessionId,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Update session state
+    session.lastActivity = new Date().toISOString();
+    sessions.set(sessionId, session);
+
+    // Run actual Lighthouse audits
+    console.log(`Running Lighthouse audit for ${url}...`);
+
+    try {
+      // Run all audits in parallel for speed (Phase 1.6.3: Added PWA)
+      const [performanceResult, accessibilityResult, seoResult, bestPracticesResult, pwaResult] = await Promise.all([
+        runPerformanceAudit(url).catch(err => {
+          console.error('Performance audit failed:', err.message);
+          return null;
+        }),
+        runAccessibilityAudit(url).catch(err => {
+          console.error('Accessibility audit failed:', err.message);
+          return null;
+        }),
+        runSEOAudit(url).catch(err => {
+          console.error('SEO audit failed:', err.message);
+          return null;
+        }),
+        runBestPracticesAudit(url).catch(err => {
+          console.error('Best Practices audit failed:', err.message);
+          return null;
+        }),
+        runPWAAudit(url).catch(err => {
+          console.error('PWA audit failed:', err.message);
+          return null;
+        })
+      ]);
+
+      // Extract scores from audit results
+      // ✅ Phase 1.6.1: Fixed path to report.content.score (not report.score)
+      // ✅ Phase 1.6.2: Added Best Practices audit extraction
+      // ✅ Phase 1.6.3: Added PWA audit extraction
+      const lighthouse_scores = {
+        performance: performanceResult?.report?.content?.score || 0,
+        accessibility: accessibilityResult?.report?.content?.score || 0,
+        seo: seoResult?.report?.content?.score || 0,
+        'best-practices': bestPracticesResult?.report?.content?.score || 0, // ✅ Phase 1.6.2
+        pwa: pwaResult?.report?.content?.score || 0 // ✅ Phase 1.6.3
+      };
+
+      // Add detailed logging for debugging (Phase 1.6.3: Added PWA)
+      console.log('Lighthouse Results Structure:', {
+        performance: {
+          hasReport: !!performanceResult?.report,
+          hasContent: !!performanceResult?.report?.content,
+          score: performanceResult?.report?.content?.score
+        },
+        accessibility: {
+          hasReport: !!accessibilityResult?.report,
+          hasContent: !!accessibilityResult?.report?.content,
+          score: accessibilityResult?.report?.content?.score
+        },
+        seo: {
+          hasReport: !!seoResult?.report,
+          hasContent: !!seoResult?.report?.content,
+          score: seoResult?.report?.content?.score
+        },
+        bestPractices: {
+          hasReport: !!bestPracticesResult?.report,
+          hasContent: !!bestPracticesResult?.report?.content,
+          score: bestPracticesResult?.report?.content?.score
+        },
+        pwa: {
+          hasReport: !!pwaResult?.report,
+          hasContent: !!pwaResult?.report?.content,
+          score: pwaResult?.report?.content?.score
+        }
+      });
+
+      // Store results in session for caching (Phase 1.6.3: Added PWA)
+      session.lighthouseResults = {
+        scores: lighthouse_scores,
+        details: {
+          performance: performanceResult,
+          accessibility: accessibilityResult,
+          seo: seoResult,
+          bestPractices: bestPracticesResult,
+          pwa: pwaResult
+        },
+        timestamp: new Date().toISOString()
+      };
+      sessions.set(sessionId, session);
+
+      console.log(`Lighthouse audit complete for ${url}:`, lighthouse_scores);
+
+      res.json({
+        success: true,
+        sessionId,
+        url,
+        lighthouse: lighthouse_scores,
+        timestamp: new Date().toISOString()
+      });
+    } catch (auditError) {
+      console.error('Lighthouse audit error:', auditError);
+
+      // Return partial results if available
+      res.json({
+        success: false,
+        sessionId,
+        url,
+        error: `Lighthouse audit failed: ${auditError.message}`,
+        lighthouse: {
+          categories: ['performance', 'accessibility', 'best-practices', 'seo'],
+          note: 'Lighthouse audit failed - Chrome/Chromium may not be available in production environment'
+        },
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Close session
+app.post('/session/:id/close', async (req, res) => {
+  try {
+    const sessionId = req.params.id;
+
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found',
+        sessionId,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Remove session
+    sessions.delete(sessionId);
+
+    res.json({
+      success: true,
+      sessionId,
+      message: 'Session closed successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Comprehensive site analysis endpoint
+app.post('/session/:id/comprehensive-analysis', async (req, res) => {
+  try {
+    const sessionId = req.params.id;
+    const { url } = req.body;
+
+    if (!url) {
+      return res.status(400).json({
+        success: false,
+        error: 'URL is required',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found',
+        sessionId,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    console.log(`[${sessionId}] Running comprehensive site analysis for ${url}`);
+
+    // Run comprehensive analysis
+    const analysis = await runComprehensiveSiteAnalysis(url);
+
+    // Store in session for caching
+    session.comprehensiveAnalysis = analysis;
+
+    res.json({
+      success: true,
+      sessionId,
+      analysis,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Comprehensive analysis failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Comprehensive analysis failed',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ========================================================================
+// LEGACY ENDPOINTS (Backward Compatibility)
+// ========================================================================
 
 // Screenshot endpoint
 app.post('/browser/screenshot', async (req, res) => {
@@ -340,12 +729,14 @@ app.use((err, req, res, next) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`✅ AgentDesk Browser Tools MCP HTTP Server running on http://localhost:${PORT}`);
+  console.log(`✅ AgentDesk Browser Tools MCP HTTP Server v2.0 running on http://localhost:${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`📊 Status: http://localhost:${PORT}/status`);
+  console.log(`🔗 Session API: POST /session/start`);
   console.log(`🌐 Chrome extension integration enabled`);
   console.log(`📈 Lighthouse auditing: Performance, SEO, Accessibility, Best Practices`);
   console.log(`🤖 MCP protocol for AI-powered browser interaction`);
+  console.log(`✨ Session-based workflow support added`);
   console.log(`📝 Full docs: https://browsertools.agentdesk.ai/`);
   console.log('');
   console.log('⚠️  Note: Full functionality requires:');
@@ -357,5 +748,6 @@ app.listen(PORT, () => {
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n🛑 Shutting down AgentDesk Browser Tools MCP HTTP Server...');
+  console.log(`📊 Active sessions at shutdown: ${sessions.size}`);
   process.exit(0);
 });

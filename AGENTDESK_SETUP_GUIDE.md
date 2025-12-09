@@ -18,7 +18,7 @@ AgentDesk Browser Tools MCP has **three components** that work together:
 #### 1. Chrome Extension v1.2.0
 - **Purpose**: Captures screenshots, console logs, network activity, DOM elements
 - **Install**: Download from [v1.2.0 BrowserToolsMCP Chrome Extension](https://github.com/AgentDeskAI/browser-tools-mcp/releases/download/v1.2.0/BrowserTools-1.2.0-extension.zip)
-- **Location**: Already present at `/Users/robertsher/Projects/automation-hub/mcp-servers/agentdesk-browser-tools/chrome-extension`
+- **Location**: Already present at `/Users/robertsher/Projects/automation-hub/mcp-servers/agentdesk-browser-mcp/chrome-extension`
 
 #### 2. browser-tools-server (Node Server Middleware)
 - **Purpose**: Acts as middleware between Chrome extension and MCP server
@@ -35,7 +35,7 @@ AgentDesk Browser Tools MCP has **three components** that work together:
 #### 4. http-server.js (HTTP Wrapper) ✅ ALREADY RUNNING
 - **Purpose**: HTTP REST API wrapper around AgentDesk components (port 5031)
 - **Status**: ✅ Running on port 5031
-- **Location**: `/Users/robertsher/Projects/automation-hub/mcp-servers/agentdesk-browser-tools/http-server.js`
+- **Location**: `/Users/robertsher/Projects/automation-hub/mcp-servers/agentdesk-browser-mcp/http-server.js`
 
 ---
 
@@ -68,7 +68,7 @@ AgentDesk Browser Tools MCP has **three components** that work together:
 
 ```bash
 # Extension already present locally
-cd /Users/robertsher/Projects/automation-hub/mcp-servers/agentdesk-browser-tools/chrome-extension
+cd /Users/robertsher/Projects/automation-hub/mcp-servers/agentdesk-browser-mcp/chrome-extension
 
 # Manual Installation in Chrome:
 # 1. Open Chrome → chrome://extensions/
