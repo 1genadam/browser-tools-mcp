@@ -82,7 +82,16 @@ export async function runLighthouseAudit(
       console.log(
         `Running Lighthouse with categories: ${categories.join(", ")}`
       );
-      const runnerResult = await lighthouse(url, flags as Flags, config);
+
+      // Add timeout wrapper to prevent hanging (3 minutes)
+      const LIGHTHOUSE_TIMEOUT = 180000;
+      const runnerResult = await Promise.race([
+        lighthouse(url, flags as Flags, config),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Lighthouse timeout after 3 minutes")), LIGHTHOUSE_TIMEOUT)
+        )
+      ]);
+
       console.log("Lighthouse scan completed");
 
       if (!runnerResult?.lhr) {

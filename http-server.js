@@ -16,7 +16,6 @@ import { runPerformanceAudit } from './browser-tools-server/dist/lighthouse/perf
 import { runSEOAudit } from './browser-tools-server/dist/lighthouse/seo.js';
 import { runBestPracticesAudit } from './browser-tools-server/dist/lighthouse/best-practices.js';
 import { runPWAAudit } from './browser-tools-server/dist/lighthouse/pwa.js';
-import { runComprehensiveSiteAnalysis } from './browser-tools-server/dist/lighthouse/comprehensive-analysis.js';
 import { AuditCategory } from './browser-tools-server/dist/lighthouse/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -320,15 +319,15 @@ app.get('/session/:id/lighthouse', async (req, res) => {
       ]);
 
       // Extract scores from audit results
-      // ✅ Phase 1.6.1: Fixed path to report.content.score (not report.score)
-      // ✅ Phase 1.6.2: Added Best Practices audit extraction
-      // ✅ Phase 1.6.3: Added PWA audit extraction
+      // ✅ Phase 1.6.5: Fixed score extraction path - removed .content level
+      // Lighthouse TypeScript functions return: { report: { score: number } } structure
+      // Each individual audit function (runPerformanceAudit, etc.) already converts to 0-100 range
       const lighthouse_scores = {
-        performance: performanceResult?.report?.content?.score || 0,
-        accessibility: accessibilityResult?.report?.content?.score || 0,
-        seo: seoResult?.report?.content?.score || 0,
-        'best-practices': bestPracticesResult?.report?.content?.score || 0, // ✅ Phase 1.6.2
-        pwa: pwaResult?.report?.content?.score || 0 // ✅ Phase 1.6.3
+        performance: performanceResult?.report?.score || 0,
+        accessibility: accessibilityResult?.report?.score || 0,
+        seo: seoResult?.report?.score || 0,
+        'best-practices': bestPracticesResult?.report?.score || 0,
+        pwa: pwaResult?.report?.score || 0
       };
 
       // Add detailed logging for debugging (Phase 1.6.3: Added PWA)
@@ -441,7 +440,7 @@ app.post('/session/:id/close', async (req, res) => {
   }
 });
 
-// Comprehensive site analysis endpoint
+// Comprehensive site analysis endpoint (placeholder - implementation pending)
 app.post('/session/:id/comprehensive-analysis', async (req, res) => {
   try {
     const sessionId = req.params.id;
@@ -465,18 +464,14 @@ app.post('/session/:id/comprehensive-analysis', async (req, res) => {
       });
     }
 
-    console.log(`[${sessionId}] Running comprehensive site analysis for ${url}`);
+    console.log(`[${sessionId}] Comprehensive analysis requested for ${url} (not yet implemented)`);
 
-    // Run comprehensive analysis
-    const analysis = await runComprehensiveSiteAnalysis(url);
-
-    // Store in session for caching
-    session.comprehensiveAnalysis = analysis;
-
+    // TODO: Implement comprehensive analysis when comprehensive-analysis.ts is compiled
     res.json({
-      success: true,
+      success: false,
       sessionId,
-      analysis,
+      error: 'Comprehensive analysis feature not yet implemented',
+      note: 'Use individual Lighthouse audit endpoints instead',
       timestamp: new Date().toISOString()
     });
   } catch (error) {
